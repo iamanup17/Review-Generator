@@ -1,6 +1,6 @@
 import { useLottie } from "lottie-react";
 import { RotateCw, UserRoundPen } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import goog2 from "../assets-pro/73078169fac4957111df81ad1f5e3f88.png";
 import anu from "../assets-pro/loading.json";
@@ -24,9 +24,10 @@ const ReviewPage = () => {
   const business = businesses[category]?.[businessId];
 
   // Fallback static reviews
-  const businessReviews = reviews[category]?.[businessId] || [
-    "Thanks for visiting, please leave feedback!",
-  ];
+  const businessReviews = useMemo(
+    () => reviews[category]?.[businessId] || ["Thanks for visiting, please leave feedback!"],
+    [category, businessId]
+  );
 
   const [review, setReview] = useState("");
   const [loading, setLoading] = useState(false);
@@ -41,18 +42,7 @@ const ReviewPage = () => {
     loop: true,
   };
 
-  const { View } = useLottie(options);
-
-  // Generate review when sentiment changes
-  useEffect(() => {
-    if (business) {
-      generateAIReview();
-    }
-  }, [reviewSentiment, business]);
-
-  useEffect(() => {
-    setEditedReview(review);
-  }, [review]);
+  useLottie(options);
 
   const getPromptByCategory = (
     category,
@@ -104,176 +94,152 @@ const ReviewPage = () => {
     }
   };
 
-  // Helper function to trim text to character limit while preserving complete sentences
-  const trimToCharacterLimit = (text, maxChars) => {
-    if (text.length <= maxChars) return text;
+  const generateAIReview = useCallback(
+    async (retryCount = 1, maxRetries = 3) => {
+      if (!business) return;
+      setLoading(true);
 
-    let trimmed = text.substring(0, maxChars);
-    const sentenceEnders = ['.', '!', '?'];
+      try {
+        const prompt = getPromptByCategory(
+          category,
+          business.name,
+          business.description || "A great local service.",
+          reviewSentiment
+        );
 
-    // Find the last complete sentence within character limit
-    let lastSentenceEnd = -1;
-    for (let i = trimmed.length - 1; i >= 0; i--) {
-      if (sentenceEnders.includes(trimmed[i])) {
-        lastSentenceEnd = i;
-        break;
-      }
-    }
+        const response = await fetch(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${process.env.REACT_APP_OPEN_ROUTER_API_KEY}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": window.location.origin,
+              "X-Title": "Review Generator",
+            },
+            body: JSON.stringify({
+              model: "meta-llama/llama-3.1-8b-instruct",
+              messages: [
+                {
+                  role: "user",
+                  content: prompt,
+                },
+              ],
+              max_tokens: 80,
+              temperature: 0.6,
+            }),
+          }
+        );
 
-    if (lastSentenceEnd !== -1 && lastSentenceEnd > maxChars * 0.7) {
-      // Use complete sentence if it's not too short (at least 70% of max chars)
-      return trimmed.substring(0, lastSentenceEnd + 1);
-    } else {
-      // Find last complete word and add period
-      trimmed = trimmed.replace(/\s+\S*$/, '').trim();
-      if (trimmed && !sentenceEnders.includes(trimmed[trimmed.length - 1])) {
-        trimmed += '.';
-      }
-      return trimmed;
-    }
-  };
-
-  const generateAIReview = async (retryCount = 1, maxRetries = 3) => {
-    if (!business) return;
-    setLoading(true);
-
-    try {
-      const prompt = getPromptByCategory(
-        category,
-        business.name,
-        business.description || "A great local service.",
-        reviewSentiment
-      );
-
-      const response = await fetch(
-        "https://openrouter.ai/api/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${process.env.REACT_APP_OPEN_ROUTER_API_KEY}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": window.location.origin,
-            "X-Title": "Review Generator",
-          },
-          body: JSON.stringify({
-            model: "meta-llama/llama-3.1-8b-instruct",
-            messages: [
-              {
-                role: "user",
-                content: prompt,
-              },
-            ],
-            max_tokens: 80,
-            temperature: 0.6,
-          }),
+        if (!response.ok) {
+          const errorData = await response.json();
+          const errorMsg = errorData.error?.message || "API request failed";
+          console.error("OpenRouter API Error:", errorMsg, response.status);
+          throw new Error(errorMsg);
         }
-      );
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        const errorMsg = errorData.error?.message || "API request failed";
-        console.error("OpenRouter API Error:", errorMsg, response.status);
-        throw new Error(errorMsg);
-      }
+        const data = await response.json();
+        console.log("Raw API Response:", JSON.stringify(data, null, 2));
+        let generated =
+          data.choices?.[0]?.message?.content?.trim() ||
+          "Couldn't generate a review.";
+        console.log("Generated Review (Before Cleanup):", generated);
 
-      const data = await response.json();
-      console.log("Raw API Response:", JSON.stringify(data, null, 2));
-      let generated =
-        data.choices?.[0]?.message?.content?.trim() ||
-        "Couldn't generate a review.";
-      console.log("Generated Review (Before Cleanup):", generated);
+        generated = generated.replace(prompt, "").trim();
+        generated = generated.replace(/^(Review:|###|\*\*|--|\s*)/i, "").trim();
+        generated = generated.replace(/^[`'"]|['"`]$/g, "").trim();
+        generated = generated.replace(/\s+/g, " ").trim();
+        console.log("Generated Review (After Cleanup):", generated);
 
-      // Enhanced cleanup
-      generated = generated.replace(prompt, "").trim();
-      generated = generated.replace(/^(Review:|###|\*\*|--|\s*)/i, "").trim();
-      generated = generated.replace(/^[`'"]|['"`]$/g, "").trim();
-      generated = generated.replace(/\s+/g, " ").trim();
-      console.log("Generated Review (After Cleanup):", generated);
+        const words = generated.split(" ");
+        if (words.length > 30) {
+          let trimmed = words.slice(0, 30).join(" ");
 
-      // Trim to 20-30 words while ensuring a complete sentence
-      const words = generated.split(" ");
-      if (words.length > 30) {
-        let trimmed = words.slice(0, 30).join(" ");
+          const sentenceEnders = ['.', '!', '?'];
+          let lastSentenceEnd = -1;
 
-        // Find the last complete sentence within the word limit
-        const sentenceEnders = ['.', '!', '?'];
-        let lastSentenceEnd = -1;
+          for (let i = trimmed.length - 1; i >= 0; i--) {
+            if (sentenceEnders.includes(trimmed[i])) {
+              lastSentenceEnd = i;
+              break;
+            }
+          }
 
-        for (let i = trimmed.length - 1; i >= 0; i--) {
-          if (sentenceEnders.includes(trimmed[i])) {
-            lastSentenceEnd = i;
-            break;
+          if (lastSentenceEnd !== -1) {
+            trimmed = trimmed.substring(0, lastSentenceEnd + 1);
+          } else {
+            trimmed = trimmed.replace(/\s+\S*$/, "").trim();
+            if (trimmed && !sentenceEnders.includes(trimmed[trimmed.length - 1])) {
+              trimmed += ".";
+            }
+          }
+          generated = trimmed;
+        } else if (
+          words.length < 20 &&
+          generated !== "Couldn't generate a valid review."
+        ) {
+          console.warn("Generated review too short:", generated);
+
+          if (retryCount < maxRetries) {
+            console.log("Review too short, retrying generation...");
+            setTimeout(() => generateAIReview(retryCount + 1, maxRetries), 1000);
+            return;
+          } else {
+            generated = "Couldn't generate a valid review.";
           }
         }
 
-        if (lastSentenceEnd !== -1) {
-          // Use the complete sentence
-          trimmed = trimmed.substring(0, lastSentenceEnd + 1);
-        } else {
-          // If no complete sentence found, try to end at a natural break
-          // Look for the last complete word and add a period
-          trimmed = trimmed.replace(/\s+\S*$/, '').trim();
-          if (trimmed && !sentenceEnders.includes(trimmed[trimmed.length - 1])) {
-            trimmed += '.';
-          }
-        }
-        generated = trimmed;
-      } else if (
-        words.length < 20 &&
-        generated !== "Couldn't generate a valid review."
-      ) {
-        console.warn("Generated review too short:", generated);
+        const isValidReview = (text) => {
+          const words = text.split(" ").filter((word) => word.length > 0);
+          const hasProperEnding = /[.!?]$/.test(text.trim());
+          const hasNoIncompleteEnding = !text.match(/,\s*$|and\s*$|but\s*$|or\s*$/i);
+          const hasMinLength = text.trim().length >= 50;
+          const hasNoEllipsis = !text.includes("...");
 
-        // If review is too short, regenerate instead of failing
-        if (retryCount < maxRetries) {
-          console.log("Review too short, retrying generation...");
-          setTimeout(() => generateAIReview(retryCount + 1, maxRetries), 1000);
-          return;
-        } else {
+          return (
+            words.length >= 20 &&
+            words.length <= 30 &&
+            hasProperEnding &&
+            hasNoIncompleteEnding &&
+            hasMinLength &&
+            hasNoEllipsis
+          );
+        };
+
+        if (!isValidReview(generated)) {
+          console.warn("Generated review invalid:", generated);
           generated = "Couldn't generate a valid review.";
         }
+
+        setReview(generated);
+        setIsEditing(false);
+      } catch (err) {
+        console.error("AI Generation Error:", err.message);
+        if (retryCount < maxRetries) {
+          console.log(`Retrying... Attempt ${retryCount + 1}/${maxRetries}`);
+          setTimeout(() => generateAIReview(retryCount + 1, maxRetries), 2000);
+        } else {
+          console.warn("Max retries reached, using fallback review.");
+          const fallbackReview =
+            businessReviews[Math.floor(Math.random() * businessReviews.length)];
+          setReview(fallbackReview);
+        }
+      } finally {
+        setLoading(false);
       }
+    },
+    [business, businessReviews, category, reviewSentiment]
+  );
 
-      // Validate the generated review
-      const isValidReview = (text) => {
-        const words = text.split(" ").filter(word => word.length > 0);
-        const hasProperEnding = /[.!?]$/.test(text.trim());
-        const hasNoIncompleteEnding = !text.match(/,\s*$|and\s*$|but\s*$|or\s*$/i);
-        const hasMinLength = text.trim().length >= 50; // Minimum character length
-        const hasNoEllipsis = !text.includes("...");
-
-        return (
-          words.length >= 20 &&
-          words.length <= 30 &&
-          hasProperEnding &&
-          hasNoIncompleteEnding &&
-          hasMinLength &&
-          hasNoEllipsis
-        );
-      };
-
-      if (!isValidReview(generated)) {
-        console.warn("Generated review invalid:", generated);
-        generated = "Couldn't generate a valid review.";
-      }
-
-      setReview(generated);
-      setIsEditing(false);
-    } catch (err) {
-      console.error("AI Generation Error:", err.message);
-      if (retryCount < maxRetries) {
-        console.log(`Retrying... Attempt ${retryCount + 1}/${maxRetries}`);
-        setTimeout(() => generateAIReview(retryCount + 1, maxRetries), 2000);
-      } else {
-        console.warn("Max retries reached, using fallback review.");
-        const fallbackReview =
-          businessReviews[Math.floor(Math.random() * businessReviews.length)];
-        setReview(fallbackReview);
-      }
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (business) {
+      generateAIReview();
     }
-  };
+  }, [business, generateAIReview]);
+
+  useEffect(() => {
+    setEditedReview(review);
+  }, [review]);
 
   const handlePostReview = () => {
     if (!business) return;
