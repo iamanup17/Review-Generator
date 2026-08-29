@@ -1,5 +1,4 @@
-import React from "react";
-import { Button, ButtonGroup, Container, InfoBox, Loader, ReviewBox, Title } from "./ReviewPageStyles";
+import { Button, ButtonGroup, Container, InfoBox, ReviewBox, Title } from "./ReviewPageStyles";
 
 const Landing = () => {
   return (
