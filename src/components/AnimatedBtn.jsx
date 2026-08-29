@@ -1,5 +1,4 @@
 // AnimatedButton.tsx
-import React from "react";
 import styled, { keyframes } from "styled-components";
 
 const moveAlongBorder = keyframes`
