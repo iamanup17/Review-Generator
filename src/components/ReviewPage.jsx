@@ -1,6 +1,3 @@
-
-
-
 import { useLottie } from "lottie-react";
 import { RotateCw, UserRoundPen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";

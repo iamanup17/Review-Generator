@@ -147,8 +147,6 @@ export const businesses = {
   },
 };
 
-
-
 export const reviews = {
   garage: {
     1: ["Great service at Auto Care Garage!"],
