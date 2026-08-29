@@ -57,7 +57,7 @@ export const businesses = {
         "Elegant restaurant serving delicious Indian amd Chinesse cuisine with a cozy ambiance and friendly staff.",
       googleReviewUrl:
         "https://search.google.com/local/writereview?placeid=ChIJFT7HE76V1DsR1xV2BBSZ67o&cb=67221695",
-      reviewType: "showBoth",
+      reviewType: "showAll",
     },
     13: {
       name: "MJ Cafe Hub",
